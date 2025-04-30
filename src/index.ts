@@ -5,7 +5,6 @@ dotenv.config();
 sdk.connect();
 
 const SPACING = parseFloat(process.env.SPACING!);
-const HALF_SPACING = SPACING / 2;
 const ORDER_SIZE = parseFloat(process.env.ORDER_SIZE!);
 const GRID_LEVELS = parseInt(process.env.GRID_LEVELS!);
 const COIN = process.env.COIN!;
@@ -20,7 +19,6 @@ type ActiveOrder = { id: any; price: number };
 let sellOrders: ActiveOrder[] = [];
 let buyOrders: ActiveOrder[] = [];
 let sessionPnl = 0;
-let running = true;
 
 async function cancelOrderWithTimeout(orderId: any, timeoutMs = 5000) {
   return Promise.race([
@@ -111,7 +109,7 @@ async function getMidPrice(): Promise<number> {
 async function placeOrder(
   price: number,
   isBuy: boolean,
-  size: number = ORDER_SIZE
+  size: number = ORDER_SIZE || 1
 ) {
   return sdk.exchange
     .placeOrder({
@@ -158,8 +156,8 @@ async function initializeGrid() {
   const gridPromises = Array.from({ length: GRID_LEVELS }, (_, index) => {
     const level = index + 1;
     return Promise.all([
-      placeOrder(mid * (1 + SPACING * level), false, ORDER_SIZE),
-      placeOrder(mid * (1 - SPACING * level), true, ORDER_SIZE),
+      placeOrder(mid * (1 + SPACING * level), false, ORDER_SIZE * level),
+      placeOrder(mid * (1 - SPACING * level), true, ORDER_SIZE * level),
     ]);
   });
 
@@ -201,26 +199,6 @@ async function checkFills() {
 }
 
 async function handleSellFill(filledIndex: number) {
-  // const filledOrder = sellOrders[filledIndex];
-
-  // // Cancel ALL buy orders (opposite side)
-  // await Promise.all(buyOrders.map((o) => cancelOrderWithTimeout(o.id)));
-  // buyOrders = [];
-
-  // // Cancel the filled sell order
-  // await cancelOrderWithTimeout(filledOrder.id);
-  // sellOrders.splice(filledIndex, 1);
-
-  // // Rebuild sell side
-  // const lastPrice =
-  //   sellOrders[sellOrders.length - 1]?.price ?? (await getMidPrice());
-  // const newSellOrder = await placeOrder(
-  //   lastPrice * (1 + SPACING),
-  //   false,
-  //   ORDER_SIZE
-  // );
-  // if (newSellOrder) sellOrders.push(newSellOrder);
-  // sellOrders = sellOrders.slice(-GRID_LEVELS);
   const filledOrder = sellOrders[filledIndex];
 
   console.log("[FILL] Sell order filled, resetting full grid...");
@@ -244,33 +222,9 @@ async function handleSellFill(filledIndex: number) {
   sessionPnl += profit;
   console.log(`Sell fill profit: +${profit.toFixed(4)} USD`);
   console.log(`Session PnL: ${sessionPnl.toFixed(4)} USD`);
-
-  // Rebuild buy grid shifted up
-  await shiftBuyGrid(true);
 }
 
 async function handleBuyFill(filledIndex: number) {
-  // const filledOrder = buyOrders[filledIndex];
-
-  // // Cancel ALL sell orders (opposite side)
-  // await Promise.all(sellOrders.map((o) => cancelOrderWithTimeout(o.id)));
-  // sellOrders = [];
-
-  // // Cancel the filled buy order
-  // await cancelOrderWithTimeout(filledOrder.id);
-  // buyOrders.splice(filledIndex, 1);
-
-  // // Rebuild buy side
-  // const lastPrice =
-  //   buyOrders[buyOrders.length - 1]?.price ?? (await getMidPrice());
-  // const newBuyOrder = await placeOrder(
-  //   lastPrice * (1 - SPACING),
-  //   true,
-  //   ORDER_SIZE
-  // );
-  // if (newBuyOrder) buyOrders.push(newBuyOrder);
-  // buyOrders = buyOrders.slice(-GRID_LEVELS);
-
   const filledOrder = buyOrders[filledIndex];
 
   console.log("[FILL] Buy order filled, resetting full grid...");
@@ -299,73 +253,11 @@ async function handleBuyFill(filledIndex: number) {
   // await shiftSellGrid(false);
 }
 
-async function shiftBuyGrid(up: boolean) {
-  await Promise.all(buyOrders.map((order) => cancelOrder(order.id)));
-  buyOrders = [];
-
-  const mid = await getMidPrice();
-  const promises = [];
-
-  for (let i = 1; i <= GRID_LEVELS; i++) {
-    const price = mid * (1 - SPACING * i) * (up ? 1 + HALF_SPACING : 1);
-    promises.push(placeOrder(price, true));
-  }
-
-  const results = await Promise.all(promises);
-
-  for (const order of results) {
-    if (order) buyOrders.push(order);
-  }
-}
-
-async function shiftSellGrid(down: boolean) {
-  await Promise.all(sellOrders.map((order) => cancelOrder(order.id)));
-  sellOrders = [];
-
-  const mid = await getMidPrice();
-  const promises = [];
-
-  for (let i = 1; i <= GRID_LEVELS; i++) {
-    const price = mid * (1 + SPACING * i) * (down ? 1 - HALF_SPACING : 1);
-    promises.push(placeOrder(price, false));
-  }
-
-  const results = await Promise.all(promises);
-
-  for (const order of results) {
-    if (order) sellOrders.push(order);
-  }
-}
-
-async function periodicCleanup() {
-  console.log("[CLEANUP] Running scheduled cleanup...");
-
-  try {
-    const openOrders = await sdk.info.getUserOpenOrders(USER_ADDRESS);
-
-    if (openOrders?.length) {
-      console.log(`[CLEANUP] Cancelling ${openOrders.length} open orders...`);
-      await Promise.all(openOrders.map((o) => cancelOrderWithTimeout(o.oid)));
-    }
-
-    sellOrders = [];
-    buyOrders = [];
-
-    await initializeGrid();
-
-    console.log("[CLEANUP] Grid reinitialized after cleanup.");
-  } catch (err) {
-    console.error("[CLEANUP] Error during cleanup:", err);
-  }
-}
-
 async function main() {
   // Schedule cleanup every 10 minutes
 
   console.log("Starting Dynamic Grid Bot...");
   await initializeGrid();
-
-  setInterval(periodicCleanup, 10 * 60 * 1000); // optional - comment if not needed
 
   while (true) {
     try {
