@@ -1,10 +1,10 @@
 import sdk from "./hyperliquidClient";
 import dotenv from "dotenv";
-import { v4 as uuid } from "uuid";
+import { CandleSnapshot } from "hyperliquid";
 dotenv.config();
 sdk.connect();
 
-const SPACING = parseFloat(process.env.SPACING!);
+const SPREAD = parseFloat(process.env.SPREAD!);
 const ORDER_SIZE = parseFloat(process.env.ORDER_SIZE!);
 const GRID_LEVELS = parseInt(process.env.GRID_LEVELS!);
 const COIN = process.env.COIN!;
@@ -13,12 +13,12 @@ const SYMBOL = `${COIN}-${SPOT_OR_PERP}`;
 const INTERVAL_MS = parseInt(process.env.INTERVAL_MS!);
 const USER_ADDRESS = process.env.WALLET_ADDRESS!;
 const HEDGE_MODE = !!process.env.HEDGE_MODE;
+const ATR_INTERVAL = process.env.ATR_INTERVAL || "1m";
 
 type ActiveOrder = { id: any; price: number };
 
 let sellOrders: ActiveOrder[] = [];
 let buyOrders: ActiveOrder[] = [];
-let sessionPnl = 0;
 
 async function cancelOrderWithTimeout(orderId: any, timeoutMs = 5000) {
   return Promise.race([
@@ -150,14 +150,55 @@ async function cancelOrder(orderId: any) {
   }
 }
 
+const getCandlesSnapshot = async () => {
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).getTime();
+  const candles = await sdk.info.getCandleSnapshot(
+    SYMBOL,
+    ATR_INTERVAL,
+    tenMinutesAgo,
+    new Date().getTime()
+  );
+
+  console.log("candles", JSON.stringify(candles, null, 2));
+  return candles;
+};
+
+const calculateAverageTrueRange = (candles: CandleSnapshot) => {
+  // Calculate the True Range (TR) for each candle between the high and the low of the candle
+  const trueRanges = candles.map((candle) => {
+    // Extract the string high, low, and close prices from the candle as numbers
+    const high = parseFloat(candle.h);
+    const low = parseFloat(candle.l);
+    const close = parseFloat(candle.c);
+
+    // Calculate the True Range (TR)
+    const tr = Math.max(
+      high - low,
+      Math.abs(high - close),
+      Math.abs(low - close)
+    );
+
+    return tr;
+  });
+
+  // Calculate the Average True Range (ATR) over the last 14 candles
+  const atr = trueRanges.reduce((sum, tr) => sum + tr, 0) / trueRanges.length;
+  console.log("ATR", atr);
+
+  return atr / 100; // Convert ATR to a percentage
+};
+
 async function initializeGrid() {
   const mid = await getMidPrice();
+
+  const candles = await getCandlesSnapshot();
+  const atr = calculateAverageTrueRange(candles);
 
   const gridPromises = Array.from({ length: GRID_LEVELS }, (_, index) => {
     const level = index + 1;
     return Promise.all([
-      placeOrder(mid * (1 + SPACING * level), false, ORDER_SIZE * level),
-      placeOrder(mid * (1 - SPACING * level), true, ORDER_SIZE * level),
+      placeOrder((mid + atr) * (1 + SPREAD * level), false, ORDER_SIZE * level),
+      placeOrder((mid - atr) * (1 - SPREAD * level), true, ORDER_SIZE * level),
     ]);
   });
 
@@ -215,13 +256,6 @@ async function handleSellFill(filledIndex: number) {
   await initializeGrid();
 
   console.log("[FILL] Grid reset after sell fill.");
-
-  // Track profit
-  const fillPrice = filledOrder.price;
-  const profit = ORDER_SIZE * SPACING * fillPrice;
-  sessionPnl += profit;
-  console.log(`Sell fill profit: +${profit.toFixed(4)} USD`);
-  console.log(`Session PnL: ${sessionPnl.toFixed(4)} USD`);
 }
 
 async function handleBuyFill(filledIndex: number) {
@@ -241,16 +275,6 @@ async function handleBuyFill(filledIndex: number) {
   await initializeGrid();
 
   console.log("[FILL] Grid reset after buy fill.");
-
-  // Track profit
-  const fillPrice = filledOrder.price;
-  const profit = ORDER_SIZE * SPACING * fillPrice;
-  sessionPnl += profit;
-  console.log(`Buy fill profit: +${profit.toFixed(4)} USD`);
-  console.log(`Session PnL: ${sessionPnl.toFixed(4)} USD`);
-
-  // // Rebuild sell grid shifted down
-  // await shiftSellGrid(false);
 }
 
 async function main() {
@@ -275,8 +299,7 @@ async function main() {
     } catch (err) {
       console.error("Error:", err);
     }
-    console.log("sellOrders", JSON.stringify(sellOrders, null, 2));
-    console.log("buyOrders", JSON.stringify(buyOrders, null, 2));
+
     await new Promise((r) => setTimeout(r, INTERVAL_MS));
   }
 }
