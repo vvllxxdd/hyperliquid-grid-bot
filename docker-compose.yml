@@ -1,0 +1,14 @@
+services:
+  hyperliquid-grid-bot:
+    build: .
+    container_name: hyperliquid-grid-bot
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2m"
+        max-file: "3"
