@@ -1,0 +1,24 @@
+{
+  "name": "grid-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "ts-node src/index.ts",
+    "build": "tsc",
+    "postinstall": "exit 0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "hyperliquid": "github:nomeida/hyperliquid#6107c87397bafbc6f88b39bc9de562ed6b77ce90",
+    "uuid": "^11.1.0"
+  }
+}
