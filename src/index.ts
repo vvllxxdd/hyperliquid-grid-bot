@@ -117,7 +117,7 @@ async function placeOrder(
       is_buy: isBuy,
       sz: size,
       limit_px: price.toFixed(3),
-      order_type: { limit: { tif: "Gtc" } },
+      order_type: { limit: { tif: "Alo" } },
       reduce_only: HEDGE_MODE && isBuy,
     })
     .then((res) => {
